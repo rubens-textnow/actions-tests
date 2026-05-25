@@ -10,6 +10,7 @@ on:
   # queue. pull_request fires the same job graph on PR open / sync, which is
   # what we want to exercise.
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - main
 
