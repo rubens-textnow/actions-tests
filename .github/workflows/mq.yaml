@@ -46,27 +46,44 @@ jobs:
       target_env: 'stage'
       new_tag: 'build-${{ github.run_id }}'
 
-  # Canary normal path: gated by `environment: canary` inside manual-deploy.yaml.
-  # Runs only when not a hotfix.
+  # Skipped on hotfix runs (mirrors textnow-server stage-backend-test).
+  stage-backend-test:
+    if: needs.resolve-stage-runtime.outputs.is_hotfix != 'true'
+    needs:
+      - resolve-stage-runtime
+      - trigger-stage-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "running stage backend tests"
+
+  # Absorbs the skipped stage-backend-test into a success result (mirror).
+  stage-backend-test-gate:
+    needs:
+      - resolve-stage-runtime
+      - stage-backend-test
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "gate result=${{ needs.stage-backend-test.result }}"
+
   trigger-canary-deploy:
     if: needs.resolve-stage-runtime.outputs.is_hotfix != 'true'
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
+      - stage-backend-test-gate
     uses: ./.github/workflows/manual-deploy.yaml
     secrets: inherit
     with:
       target_env: 'canary'
       new_tag: 'rc-${{ github.run_id }}'
 
-  # Canary hotfix path: routes through auto-deploy.yaml which has no environment
-  # gate. Runs only when is_hotfix=true. The called workflows stay unconditional;
-  # routing lives here at the caller (mirrors textnow-server PR #13133).
   trigger-canary-deploy-hotfix:
     if: needs.resolve-stage-runtime.outputs.is_hotfix == 'true'
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
+      - stage-backend-test-gate
     uses: ./.github/workflows/auto-deploy.yaml
     with:
       target_env: 'canary'
@@ -96,6 +113,8 @@ jobs:
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
+      - stage-backend-test
+      - stage-backend-test-gate
       - trigger-canary-deploy
       - trigger-canary-deploy-hotfix
       - trigger-prod-deploy
