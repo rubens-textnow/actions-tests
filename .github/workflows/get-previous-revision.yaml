@@ -1,0 +1,29 @@
+name: Get previous revision (faked)
+
+# Mirrors textnow-server/.github/workflows/argocd-get-previous-revision.yaml.
+# Only called from manual-deploy.yaml when target_env == 'prod'.
+
+on:
+  workflow_call:
+    outputs:
+      common_argocd_revision:
+        description: Faked previous revision SHA
+        value: ${{ jobs.get-revision.outputs.revision }}
+    secrets:
+      GH_TOKEN:
+        required: true
+
+jobs:
+
+  get-revision:
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.fake.outputs.revision }}
+    steps:
+      - name: Fake previous revision
+        id: fake
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" && echo "secret present"
+          echo "revision=$(echo -n "previous-$GITHUB_RUN_ID" | shasum -a 256 | cut -c1-40)" >> "$GITHUB_OUTPUT"

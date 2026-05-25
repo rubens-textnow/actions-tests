@@ -1,0 +1,39 @@
+name: Check image and deploy to environment
+
+# Mirrors textnow-server/.github/workflows/mq-check-image-and-deploy-env.yaml.
+# This is the *nested* reusable workflow called from manual-deploy.yaml — the
+# layer of indirection we suspect may interact with the schedule-time skip.
+
+on:
+  workflow_call:
+    inputs:
+      target_env:
+        required: true
+        type: string
+      new_tag:
+        required: true
+        type: string
+    outputs:
+      deploy_commit_hash:
+        description: Faked commit hash
+        value: ${{ jobs.check-and-deploy.outputs.deploy_commit_hash }}
+    secrets:
+      TEST_PAT:
+        required: true
+
+jobs:
+
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_commit_hash: ${{ steps.fake-deploy.outputs.commit }}
+    steps:
+      - name: Fake deploy
+        id: fake-deploy
+        env:
+          # Touch the required secret so its presence is exercised.
+          TEST_PAT: ${{ secrets.TEST_PAT }}
+        run: |
+          echo "Deploying ${{ inputs.new_tag }} to ${{ inputs.target_env }}."
+          test -n "$TEST_PAT" && echo "secret present"
+          echo "commit=$(echo -n "$GITHUB_RUN_ID-${{ inputs.target_env }}" | shasum -a 256 | cut -c1-40)" >> "$GITHUB_OUTPUT"

@@ -51,6 +51,7 @@ jobs:
       - resolve-stage-runtime
       - trigger-stage-deploy
     uses: ./.github/workflows/manual-deploy.yaml
+    secrets: inherit
     with:
       target_env: 'canary'
       new_tag: 'rc-${{ github.run_id }}'
@@ -61,6 +62,7 @@ jobs:
       - resolve-stage-runtime
       - trigger-canary-deploy
     uses: ./.github/workflows/manual-deploy.yaml
+    secrets: inherit
     with:
       target_env: 'prod'
       new_tag: 'prod-${{ github.run_id }}'
