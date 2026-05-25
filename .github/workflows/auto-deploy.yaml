@@ -1,0 +1,30 @@
+name: Automatic Deploy to environment
+
+on:
+  workflow_call:
+    inputs:
+      target_env:
+        required: true
+        type: string
+        description: Target environment to deploy
+      new_tag:
+        required: true
+        type: string
+        description: Built image tag
+    outputs:
+      deploy_commit_hash:
+        description: Full hash of the deploy/images commit (faked here)
+        value: ${{ jobs.check-and-deploy.outputs.deploy_commit_hash }}
+
+jobs:
+
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_commit_hash: ${{ steps.fake-deploy.outputs.commit }}
+    steps:
+      - name: Fake deploy
+        id: fake-deploy
+        run: |
+          echo "Deploying ${{ inputs.new_tag }} to ${{ inputs.target_env }} (auto, no gate)."
+          echo "commit=$(echo -n "$GITHUB_RUN_ID-${{ inputs.target_env }}" | shasum -a 256 | cut -c1-40)" >> "$GITHUB_OUTPUT"

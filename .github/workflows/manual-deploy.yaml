@@ -1,0 +1,56 @@
+name: Manual Deploy to environment
+
+on:
+  workflow_call:
+    inputs:
+      target_env:
+        required: true
+        type: string
+        description: Target environment to deploy
+      new_tag:
+        required: true
+        type: string
+        description: Built image tag
+      is_hotfix:
+        required: false
+        type: boolean
+        default: false
+        description: When true, route trigger-deployment to a no-approval environment so the deploy proceeds without manual approval.
+    outputs:
+      deploy_commit_hash:
+        description: Full hash of the deploy/images commit (faked here)
+        value: ${{ jobs.check-and-deploy.outputs.deploy_commit_hash }}
+
+jobs:
+
+  trigger-deployment:
+    runs-on: ubuntu-latest
+    # Route to `auto-deploy` (a GitHub environment with no required reviewers
+    # and no wait timer) ONLY when is_hotfix=true AND target_env != 'prod'.
+    # Otherwise route to the actual target_env, which is configured with
+    # required reviewers and gates the deploy as it always has.
+    #
+    #   is_hotfix | target_env | resolved environment | behavior
+    #   ----------|------------|----------------------|------------------------
+    #   false     | canary     | canary               | manual approval
+    #   false     | prod       | prod                 | manual approval
+    #   true      | canary     | auto-deploy          | no approval (fast-path)
+    #   true      | prod       | prod                 | manual approval (safety)
+    environment: ${{ inputs.is_hotfix && inputs.target_env != 'prod' && 'auto-deploy' || inputs.target_env }}
+    steps:
+      - name: Deployment gate cleared
+        run: |
+          echo "is_hotfix=${{ inputs.is_hotfix }} target_env=${{ inputs.target_env }}"
+
+  check-and-deploy:
+    needs:
+      - trigger-deployment
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_commit_hash: ${{ steps.fake-deploy.outputs.commit }}
+    steps:
+      - name: Fake deploy
+        id: fake-deploy
+        run: |
+          echo "Deploying ${{ inputs.new_tag }} to ${{ inputs.target_env }}."
+          echo "commit=$(echo -n "$GITHUB_RUN_ID-${{ inputs.target_env }}" | shasum -a 256 | cut -c1-40)" >> "$GITHUB_OUTPUT"

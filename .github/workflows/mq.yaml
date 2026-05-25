@@ -1,0 +1,88 @@
+name: Merge queue checks (main)
+on:
+  workflow_call:
+  merge_group:
+    types: [ checks_requested ]
+    branches:
+      - main
+
+concurrency:
+  group: merge-queue-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  resolve-stage-runtime:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      is_hotfix: ${{ steps.resolve.outputs.is_hotfix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Resolve hotfix flag from merge group PR labels
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/resolve-stage-runtime.sh
+
+  trigger-stage-deploy:
+    needs:
+      - resolve-stage-runtime
+    uses: ./.github/workflows/auto-deploy.yaml
+    with:
+      target_env: 'stage'
+      new_tag: 'build-${{ github.run_id }}'
+
+  trigger-canary-deploy:
+    needs:
+      - resolve-stage-runtime
+      - trigger-stage-deploy
+    uses: ./.github/workflows/manual-deploy.yaml
+    with:
+      target_env: 'canary'
+      new_tag: 'rc-${{ github.run_id }}'
+      is_hotfix: ${{ needs.resolve-stage-runtime.outputs.is_hotfix == 'true' }}
+
+  trigger-prod-deploy:
+    needs:
+      - resolve-stage-runtime
+      - trigger-canary-deploy
+    uses: ./.github/workflows/manual-deploy.yaml
+    with:
+      target_env: 'prod'
+      new_tag: 'prod-${{ github.run_id }}'
+      # is_hotfix intentionally NOT wired here — prod always requires manual approval.
+      # The manual-deploy.yaml workflow also self-protects via `target_env != 'prod'`,
+      # so even if a future edit passes is_hotfix=true here, prod still routes to its
+      # gated environment.
+
+  merge-queue-gate-checklist:
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-stage-runtime
+      - trigger-stage-deploy
+      - trigger-canary-deploy
+      - trigger-prod-deploy
+    if: ${{ always() }}
+    steps:
+      - name: Log all job results
+        run: |
+          echo "Summary of job statuses:"
+          echo '${{ toJSON(needs) }}' | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+
+      - name: Fail if any dependency failed or was cancelled
+        if: |
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'cancelled')
+        run: |
+          echo "One or more required jobs failed or were cancelled."
+          exit 1
+
+      - name: Deployment Successful
+        run: echo "All required jobs succeeded."
