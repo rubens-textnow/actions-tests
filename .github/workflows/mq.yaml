@@ -46,7 +46,10 @@ jobs:
       target_env: 'stage'
       new_tag: 'build-${{ github.run_id }}'
 
+  # Canary normal path: gated by `environment: canary` inside manual-deploy.yaml.
+  # Runs only when not a hotfix.
   trigger-canary-deploy:
+    if: needs.resolve-stage-runtime.outputs.is_hotfix != 'true'
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
@@ -55,21 +58,38 @@ jobs:
     with:
       target_env: 'canary'
       new_tag: 'rc-${{ github.run_id }}'
-      is_hotfix: ${{ needs.resolve-stage-runtime.outputs.is_hotfix == 'true' }}
 
+  # Canary hotfix path: routes through auto-deploy.yaml which has no environment
+  # gate. Runs only when is_hotfix=true. The called workflows stay unconditional;
+  # routing lives here at the caller (mirrors textnow-server PR #13133).
+  trigger-canary-deploy-hotfix:
+    if: needs.resolve-stage-runtime.outputs.is_hotfix == 'true'
+    needs:
+      - resolve-stage-runtime
+      - trigger-stage-deploy
+    uses: ./.github/workflows/auto-deploy.yaml
+    with:
+      target_env: 'canary'
+      new_tag: 'rc-${{ github.run_id }}'
+
+  # Fan-in over the two canary variants. Exactly one runs per pipeline; the
+  # other is skipped by its own `if:`. `always() && !cancelled()` rescues the
+  # skip so default needs-success semantics don't cascade and short-circuit
+  # prod. Prod always uses the gated manual-deploy.yaml regardless of hotfix.
   trigger-prod-deploy:
+    if: |
+      always() && !cancelled() &&
+      (needs.trigger-canary-deploy.result == 'success' ||
+       needs.trigger-canary-deploy-hotfix.result == 'success')
     needs:
       - resolve-stage-runtime
       - trigger-canary-deploy
+      - trigger-canary-deploy-hotfix
     uses: ./.github/workflows/manual-deploy.yaml
     secrets: inherit
     with:
       target_env: 'prod'
       new_tag: 'prod-${{ github.run_id }}'
-      # is_hotfix intentionally NOT wired here — prod always requires manual approval.
-      # The manual-deploy.yaml workflow also self-protects via `target_env != 'prod'`,
-      # so even if a future edit passes is_hotfix=true here, prod still routes to its
-      # gated environment.
 
   merge-queue-gate-checklist:
     runs-on: ubuntu-latest
@@ -77,6 +97,7 @@ jobs:
       - resolve-stage-runtime
       - trigger-stage-deploy
       - trigger-canary-deploy
+      - trigger-canary-deploy-hotfix
       - trigger-prod-deploy
     if: ${{ always() }}
     steps:

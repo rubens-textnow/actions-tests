@@ -1,12 +1,10 @@
 name: Manual Deploy to environment
 
-# Mirrors textnow-server/.github/workflows/mq-manual-deploy.yaml as closely as
-# possible:
-#   - declares `outputs:` referencing nested-call outputs
-#   - declares a required secret (TEST_PAT, stand-in for ENFLICK_BUILD_PAT)
-#   - has three jobs: trigger-deployment (env gate), dora-get-previous-revision
-#     (prod-only, calls a nested reusable workflow), check-and-deploy (calls a
-#     nested reusable workflow)
+# Reverted to pre-hotfix shape: no `is_hotfix` input, no conditional env
+# expression. The called workflow stays unconditional — hotfix routing
+# happens in the caller (mq.yaml), which picks `auto-deploy.yaml` instead
+# of this workflow when is_hotfix=true. This mirrors textnow-server
+# PR #13133's approach (caller-side split).
 
 on:
   workflow_call:
@@ -19,11 +17,6 @@ on:
         required: true
         type: string
         description: Built image tag
-      is_hotfix:
-        required: false
-        type: boolean
-        default: false
-        description: When true, route trigger-deployment to a no-approval environment.
     outputs:
       deploy_commit_hash:
         description: Full hash of the deploy/images commit (faked)
@@ -39,12 +32,11 @@ jobs:
 
   trigger-deployment:
     runs-on: ubuntu-latest
-    # See README + textnow-server PR #13128 for the env-swap rationale.
-    environment: ${{ inputs.is_hotfix && inputs.target_env != 'prod' && 'auto-deploy' || inputs.target_env }}
+    environment: ${{ inputs.target_env }}
     steps:
       - name: Deployment gate cleared
         run: |
-          echo "is_hotfix=${{ inputs.is_hotfix }} target_env=${{ inputs.target_env }}"
+          echo "target_env=${{ inputs.target_env }}"
 
   dora-get-previous-revision:
     needs:
