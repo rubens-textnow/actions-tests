@@ -1,1 +1,1 @@
-v3 normal-test-on-merged-workflow
+v4 hotfix-test-on-merged-workflow
