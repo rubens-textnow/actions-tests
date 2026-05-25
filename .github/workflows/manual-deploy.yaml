@@ -39,10 +39,43 @@ jobs:
 
   trigger-deployment:
     runs-on: ubuntu-latest
-    # See README + textnow-server PR #13128 for the env-swap rationale.
-    environment: ${{ inputs.is_hotfix && inputs.target_env != 'prod' && 'auto-deploy' || inputs.target_env }}
+    # No `environment:` and no job-level `if:` — the approval gate is a
+    # *step* below, so this job always schedules. Step-level `if:` is
+    # evaluated by the runner at step time, not by GitHub's scheduler at
+    # job time, which avoids the silent-skip behavior we hit with the
+    # env-swap approach.
+    permissions:
+      issues: write          # trstringer/manual-approval creates an issue
+      contents: read
+      pull-requests: read
     steps:
-      - name: Deployment gate cleared
+      - name: Wait for human approval (skipped only for hotfix + non-prod)
+        # Approval required unless this is a hotfix targeting a non-prod
+        # environment. Prod ALWAYS requires approval, regardless of is_hotfix
+        # — same safety invariant the env-swap expression had.
+        #
+        #   is_hotfix | target_env | approval step runs?
+        #   ----------|------------|---------------------
+        #   false     | canary     | yes (waits for approver)
+        #   false     | prod       | yes (waits for approver)
+        #   true      | canary     | NO  (skipped — hotfix fast-path)
+        #   true      | prod       | yes (prod never auto-deploys)
+        if: ${{ inputs.target_env == 'prod' || !inputs.is_hotfix }}
+        # Pin to a specific release tag here for the repro; in production
+        # pin to a full commit SHA so the action can't be mutated under you.
+        uses: trstringer/manual-approval@v1.9.0
+        with:
+          secret: ${{ github.token }}
+          approvers: rubens-textnow
+          minimum-approvals: 1
+          issue-title: "Approve ${{ inputs.target_env }} deploy (${{ inputs.new_tag }})"
+          issue-body: |
+            Approve this deploy by commenting `approved`, `approve`, `lgtm`, or `yes`.
+            Reject by commenting `denied`, `deny`, or `no`.
+
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Gate cleared
         run: |
           echo "is_hotfix=${{ inputs.is_hotfix }} target_env=${{ inputs.target_env }}"
 
