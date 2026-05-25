@@ -18,6 +18,14 @@ concurrency:
   group: merge-queue-${{ github.ref }}
   cancel-in-progress: false
 
+# Workflow-level permissions: the manual-deploy reusable workflow needs
+# `issues: write` to open the approval issue. Declaring it here makes the
+# workflow portable to repos with the read-only token default.
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
 jobs:
 
   resolve-stage-runtime:

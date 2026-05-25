@@ -39,17 +39,59 @@ jobs:
 
   trigger-deployment:
     runs-on: ubuntu-latest
+    # No `environment:` and no job-level `if:` — the approval gate below is a
+    # *step*, so this job always schedules. Step-level `if:` is evaluated by
+    # the runner at step time, avoiding the silent-skip behavior we hit with
+    # the env-swap approach.
     permissions:
       issues: write
       contents: read
       pull-requests: read
     steps:
       - name: Wait for human approval (skipped only for hotfix + non-prod)
+        # Approval required unless this is a hotfix targeting a non-prod env.
+        # Prod ALWAYS requires approval — same safety invariant as the
+        # env-swap expression:
+        #
+        #   is_hotfix | target_env | approval step runs?
+        #   ----------|------------|---------------------
+        #   false     | canary     | yes
+        #   false     | prod       | yes
+        #   true      | canary     | NO  (hotfix fast-path)
+        #   true      | prod       | yes (prod never auto-deploys)
         if: ${{ inputs.target_env == 'prod' || !inputs.is_hotfix }}
-        run: echo "step ran (is_hotfix=${{ inputs.is_hotfix }} target=${{ inputs.target_env }})"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.target_env }}
+          TAG: ${{ inputs.new_tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          APPROVERS: "rubens-textnow"
+          APPROVAL_TIMEOUT_MIN: "120"
+          APPROVAL_POLL_SEC: "30"
+        shell: bash
+        run: |
+          set -euo pipefail
+          approvers_re="$(echo "$APPROVERS" | tr ',' '|')"
+          body="Approve **$TARGET** deploy (\`$TAG\`).\n\nComment one of \`approved\` / \`approve\` / \`lgtm\` / \`yes\` to proceed, or \`denied\` / \`deny\` / \`no\` to reject.\n\nAuthorized approvers: \`$APPROVERS\`\n\nWorkflow run: $RUN_URL"
+          issue_url="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "Approve $TARGET deploy ($TAG)" --body "$body" --assignee "$(echo "$APPROVERS" | tr ',' ' ')")"
+          issue_number="${issue_url##*/}"
+          echo "::notice::Approval issue #$issue_number opened: $issue_url"
+          max_iters=$(( APPROVAL_TIMEOUT_MIN * 60 / APPROVAL_POLL_SEC ))
+          for _ in $(seq 1 "$max_iters"); do
+            comments_json="$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json comments)"
+            decision="$(printf '%s' "$comments_json" | jq -r --arg re "^($approvers_re)$" '.comments[] | select(.author.login | test($re; "i")) | (.body | ascii_downcase | gsub("^\\s+|\\s+$"; "")) | if test("^(approved|approve|lgtm|yes)\\b") then "APPROVED" elif test("^(denied|deny|no)\\b") then "DENIED" else empty end' | head -n 1)"
+            case "$decision" in
+              APPROVED) echo "::notice::Approved."; gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --comment "Closed by run $RUN_URL (approved)." >/dev/null || true; exit 0 ;;
+              DENIED)   echo "::error::Denied.";    gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --comment "Closed by run $RUN_URL (denied)." >/dev/null   || true; exit 1 ;;
+            esac
+            sleep "$APPROVAL_POLL_SEC"
+          done
+          echo "::error::Approval timed out after $APPROVAL_TIMEOUT_MIN minutes."
+          gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --comment "Closed by run $RUN_URL (timed out)." >/dev/null || true
+          exit 1
 
       - name: Gate cleared
-        run: echo "gate cleared"
+        run: echo "is_hotfix=${{ inputs.is_hotfix }} target_env=${{ inputs.target_env }}"
 
   dora-get-previous-revision:
     needs:
