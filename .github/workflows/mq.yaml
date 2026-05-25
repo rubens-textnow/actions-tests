@@ -67,7 +67,9 @@ jobs:
       - run: echo "gate result=${{ needs.stage-backend-test.result }}"
 
   trigger-canary-deploy:
-    if: needs.resolve-stage-runtime.outputs.is_hotfix != 'true'
+    if: |
+      always() && !cancelled() &&
+      needs.resolve-stage-runtime.outputs.is_hotfix != 'true'
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
@@ -79,7 +81,9 @@ jobs:
       new_tag: 'rc-${{ github.run_id }}'
 
   trigger-canary-deploy-hotfix:
-    if: needs.resolve-stage-runtime.outputs.is_hotfix == 'true'
+    if: |
+      always() && !cancelled() &&
+      needs.resolve-stage-runtime.outputs.is_hotfix == 'true'
     needs:
       - resolve-stage-runtime
       - trigger-stage-deploy
